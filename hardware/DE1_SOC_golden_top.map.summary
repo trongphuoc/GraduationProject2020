@@ -1,0 +1,17 @@
+Analysis & Synthesis Status : Successful - Mon Feb 24 19:38:42 2014
+Quartus II 64-Bit Version : 13.1.0 Build 162 10/23/2013 SJ Full Version
+Revision Name : DE1_SOC_golden_top
+Top-level Entity Name : DE1_SOC_golden_top
+Family : Cyclone V
+Logic utilization (in ALMs) : N/A
+Total registers : 8832
+Total pins : 386
+Total virtual pins : 0
+Total block memory bits : 358,288
+Total DSP Blocks : 0
+Total HSSI RX PCSs : 0
+Total HSSI PMA RX Deserializers : 0
+Total HSSI TX PCSs : 0
+Total HSSI TX Channels : 0
+Total PLLs : 3
+Total DLLs : 1
