@@ -1,0 +1,20 @@
+
+# Temporary files
+*~
+*.swp
+*.raw
+*.jpeg
+*.jpg
+*.png
+*.webp
+
+# Build stuff
+Makefile
+*.o
+fswebcam.1.gz
+fswebcam
+config.h
+config.log
+config.status
+*.cache
+
