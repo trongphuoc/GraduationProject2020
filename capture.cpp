@@ -15,7 +15,6 @@
 #include <sys/mman.h>
 #include <string.h>
 #include <malloc.h>
-
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/select.h>
@@ -26,20 +25,20 @@
 #include "opencv2/videoio.hpp"
 #include <iostream>
 
-extern "C"
-{
-#include <jpeglib.h>
-}
-#include <jconfig.h>
-#include <jerror.h>
-#include <jmorecfg.h>
-#include <turbojpeg.h>
+#include "jpeglib.h"
+#include "jconfig.h"
+#include "jerror.h"
+#include "jmorecfg.h"
+#include "turbojpeg.h"
+
 #include "opencv2/imgproc/imgproc_c.h"
 #include "opencv2/imgproc/imgproc.hpp"
 #include <opencv2/opencv.hpp>
 #include "opencv2/objdetect.hpp"
 #include <iostream>
 #include "hps_0.h"
+
+
 
 #define BUFFER_TEST_NUM 4
 #define SAT(c)       \
@@ -50,8 +49,27 @@ extern "C"
         else         \
             c = 255; \
     }
+
 #define SDRAM_BASE_ADDR 0
-#define ALT_VIP_SOFTWARE_RESET_N_BASE 0x00000200 //
+#define ALT_VIP_SOFTWARE_RESET_N_BASE 0x00000200   //
+
+#define ALT_STM_OFST (0xfc000000)
+#define ALT_LWFPGASLVS_OFST (0xff200000)  // axi_lw_master
+#define ALT_AXI_FPGASLVS_OFST (0xC0000000)
+#define ALT_AXI_FPGASLVS_OFST (0xC0000000)  // axi_master
+#define HW_FPGA_AXI_SPAN (0x40000000)  // Bridge span
+#define HW_FPGA_AXI_MASK ( HW_FPGA_AXI_SPAN - 1 )
+
+#define ALT_GPIO1_BASE_OFST   (0xFF709000)
+
+#define HW_REGS_BASE ( ALT_STM_OFST )
+#define HW_REGS_SPAN (0x04000000 )
+#define HW_REGS_MASK ( HW_REGS_SPAN - 1 )
+
+
+#define DEMO_VGA_FRAME0_ADDR					                0x00000000//0x00080000 //0x00100000  //on chip memory base
+#define FR0_FRAME0_OFFSET							(0x00000000)
+#define FR0_FRAME1_OFFSET	
 
 typedef struct
 {
@@ -84,6 +102,70 @@ int video_out_heigh = 480;
 int video_out_fmt = V4L2_PIX_FMT_YUYV;
 char v4l2_device_file[50] = "/dev/video0";
 char jpeg_output[50] = "Capture.jpg";
+
+//base addr
+static volatile unsigned long *h2p_lw_axi_addr=NULL;
+static volatile unsigned long *h2p_vip_frame_reader0_addr=NULL;
+static volatile unsigned long *h2p_vip_frame_reader1_addr=NULL;
+static  unsigned long *h2p_memory_addr=NULL;
+static volatile unsigned long *h2p_onchip_memory_addr=NULL;
+static volatile unsigned long *h2p_vip_mix_addr=NULL;
+
+/////////////////////////////////////////////////////////
+// VIP Frame Reader: Select active frame
+
+void VIP_FR0_SetActiveFrame(int nActiveFrame){
+	
+	// select active frame
+	h2p_vip_frame_reader0_addr[3]=nActiveFrame; // active frame 0 was set
+	
+}
+
+/////////////////////////////////////////////////////////
+// VIP Frame Reader: configure
+
+void VIP_FR_Config(int Width, int Height){
+	int word = Width*Height;
+	int cycle = Width*Height;
+	int interlace = 0;
+	
+	// stop
+	h2p_vip_frame_reader0_addr[0]=0x00; // stop
+	printf("Width=%d\r\n",Width);
+	printf("Width=%d\r\n",Height);
+	// configure frame 0
+	h2p_vip_frame_reader0_addr[4]=DEMO_VGA_FRAME0_ADDR+FR0_FRAME0_OFFSET; // // frame0 base address
+	h2p_vip_frame_reader0_addr[5]=word; // frame0 word
+	h2p_vip_frame_reader0_addr[6]=cycle; //  The number of single-cycle color patterns to read for the frame
+	h2p_vip_frame_reader0_addr[8]=Width; // frame0 width  
+	h2p_vip_frame_reader0_addr[9]=Height; // frame0 height
+	h2p_vip_frame_reader0_addr[10]=interlace; // frame0 interlace
+
+	h2p_vip_frame_reader0_addr[0]=0x01; //start
+
+	// select active frame
+	h2p_vip_frame_reader0_addr[3]=0; // active frame 0 was set
+		
+}
+
+/////////////////////////////////////////////////////////
+// VIP MIX
+void    VIP_MIX_Config(void){
+ 	h2p_vip_mix_addr[0]=0x00; //stop   	
+ 	
+ 	// din0 is layer 0, background, fixed
+		
+	// layer 2 (log)
+	h2p_vip_mix_addr[2]=130; 
+	h2p_vip_mix_addr[3]=770;
+	h2p_vip_mix_addr[4]=0x01;
+	
+	h2p_vip_mix_addr[5]=0;//(SCREEN_WIDTH-VIDEO_WIDTH)/2;//layer1 x offset
+	h2p_vip_mix_addr[6]=0;//(SCREEN_HEIGHT-VIDEO_HEIGHT)/2;//layer1 y offset
+	h2p_vip_mix_addr[7]=0x01;//set layer 1 active	
+	
+    h2p_vip_mix_addr[0]=0x01; //start
+}
 
 static int uvc_get_capability(src_v4l2_t *src_v4l2)
 {
@@ -291,7 +373,46 @@ static int uvc_set_mmap(src_v4l2_t *src)
     return 0;
 }
 
+static void yuyv_to_rgb32 (int width, int height, char *src, long *dst)
+{
+    char *s;
+    long *d;
+    int l, c, alpha = 0x0;
+    int r, g, b, cr, cg, cb, y1, y2;
 
+    l = height;
+    s = src;
+    d = dst;
+    while (l--) {
+        c = width >> 1;
+        while (c--) {
+            y1 = *s++;
+            cb = ((*s - 128) * 454) >> 8;
+            cg = (*s++ - 128) * 88;
+            y2 = *s++;
+            cr = ((*s - 128) * 359) >> 8;
+            cg = (cg + (*s++ - 128) * 183) >> 8;
+
+            r = y1 + cr;
+            b = y1 + cb;
+            g = y1 - cg;
+            SAT(r);
+            SAT(g);
+            SAT(b);
+
+            *dst++ = ((unsigned int) alpha) << 24 |  (r << 16) | (g << 8) | b;
+
+            r = y2 + cr;
+            b = y2 + cb;
+            g = y2 - cg;
+            SAT(r);
+            SAT(g);
+            SAT(b);
+            *dst++ = ((unsigned int) alpha) << 24 |  (r << 16) | (g << 8) | b;
+
+        }
+    }
+}
 static int compress_yuyv_to_jpeg(unsigned char *yuyv, FILE *file)
 {
     struct jpeg_compress_struct cinfo;
@@ -423,16 +544,56 @@ static int uvc_capture(src_v4l2_t *src, const char* file)
         src->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         src->buf.memory = V4L2_MEMORY_MMAP;
 
-        if(ioctl(src->fd, VIDIOC_DQBUF, &src->buf) < 0)
-        {
-            printf("VIDIOC_DQBUF: %s \n", strerror(errno));
-        }
+        // if(ioctl(src->fd, VIDIOC_DQBUF, &src->buf) < 0)
+        // {
+        //     printf("VIDIOC_DQBUF: %s \n", strerror(errno));
+        // }
         compress_yuyv_to_jpeg((unsigned char*)src->buffer[src->buf.index].start, file_fd);
         fclose(file_fd);
         printf("Frame saved in File %s\n", file);
     }
 }
+static int uvc_stop_capturing(src_v4l2_t *src)
+{
+    enum v4l2_buf_type type;
+    type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if(ioctl(src->fd, VIDIOC_STREAMOFF, &type) < 0)
+    {
+        printf("Stream off failed \n");
+        return -1;
+    }
+    return 0;
+}
+static int uvc_streaming(src_v4l2_t *src)
+{
+    long *rgb_buff;
+    rgb_buff = (long *) malloc (sizeof(long) * fmt.fmt.pix.width * fmt.fmt.pix.height * 4);
 
+   while(1)
+    {
+        
+        src->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        src->buf.memory = V4L2_MEMORY_MMAP;
+        if (ioctl (src->fd, VIDIOC_DQBUF, &buf) < 0)	
+        {
+            printf("VIDIOC_DQBUF failed.\n");
+            break;
+        }
+        yuyv_to_rgb32(video_out_width, video_out_heigh, (char*)src->buffer[src->buf.index].start, rgb_buff);
+         // copy rgb data to sdram address
+        memcpy(h2p_memory_addr, (unsigned long*)rgb_buff, (video_out_heigh*video_out_width*4)/8);
+        if(ioctl(src->fd, VIDIOC_QBUF, &src->buf) < 0)
+        {
+            printf("STREAMING: VIDIOC_QBUF failed \n");
+        }
+    }
+
+    //free rgb buffer
+    free(rgb_buff);
+    uvc_free_mmap(src);
+    // off
+    uvc_stop_capturing(src);
+}
 static int uvc_open(src_v4l2_t *src)
 {
     int fd_ret;
@@ -468,16 +629,51 @@ static void srcv4l2_init(src_v4l2_t *src)
 
 int main()
 {
+    void *virtual_base;
+	void *axi_virtual_base;
+	int fd;
+    long *rgb_buff;
+    rgb_buff = (long *) malloc (sizeof(long) * video_out_width * video_out_heigh * 4);
 
+    if(fd = open("/dev/mem", O_RDWR | O_SYNC) < 0)
+    {
+        printf("Open /dev/mem failed \n");
+        return -1;
+    }
+
+    virtual_base = mmap(NULL, HW_FPGA_AXI_SPAN, (PROT_READ | PROT_WRITE), MAP_SHARED, fd, HW_REGS_BASE);
+    if(virtual_base == MAP_FAILED)
+    {
+        printf("Mapping address base failed \n");
+        return -1;
+    }
+
+    axi_virtual_base = mmap(NULL, HW_FPGA_AXI_SPAN, (PROT_READ | PROT_WRITE), MAP_SHARED, fd, ALT_AXI_FPGASLVS_OFST);
+    if(axi_virtual_base == MAP_FAILED)
+    {
+        printf("Mapping address base failed \n");
+        return -1;
+    }
+
+    h2p_memory_addr=(unsigned long*)axi_virtual_base;
+    h2p_vip_mix_addr=(unsigned long*)virtual_base + ( ( unsigned long  )( ALT_LWFPGASLVS_OFST + ALT_VIP_MIX_0_BASE ) & ( unsigned long)( HW_REGS_MASK ) );		
+
+    //Configure Mixer IP core
+    VIP_MIX_Config();
+    // Configure Frame Reader core
+	VIP_FR_Config(video_out_width, video_out_heigh);
+
+    // Set up camera device file
     srcv4l2_init(&uvc_src_v4l2);
     uvc_open(&uvc_src_v4l2);
     uvc_get_capability(&uvc_src_v4l2);
     uvc_set_input(&uvc_src_v4l2);
     uvc_set_pix_format(&uvc_src_v4l2);
-    //uvc_set_fps(&uvc_src_v4l2);
     uvc_set_mmap(&uvc_src_v4l2);
     uvc_capture(&uvc_src_v4l2, jpeg_output);
-    uvc_close(&uvc_src_v4l2);
-
+    uvc_close(&uvc_src_v4l2);    
     return 0;
 }
+
+
+
