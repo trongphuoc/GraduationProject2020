@@ -567,14 +567,14 @@ static int uvc_stop_capturing(src_v4l2_t *src)
 static int uvc_streaming(src_v4l2_t *src)
 {
     long *rgb_buff;
-    rgb_buff = (long *) malloc (sizeof(long) * fmt.fmt.pix.width * fmt.fmt.pix.height * 4);
+    rgb_buff = (long *) malloc (sizeof(long) * video_out_width * video_out_heigh * 4);
 
    while(1)
     {
         
         src->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         src->buf.memory = V4L2_MEMORY_MMAP;
-        if (ioctl (src->fd, VIDIOC_DQBUF, &buf) < 0)	
+        if (ioctl (src->fd, VIDIOC_DQBUF, &src->buf) < 0)	
         {
             printf("VIDIOC_DQBUF failed.\n");
             break;
