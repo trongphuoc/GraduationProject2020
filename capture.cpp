@@ -19,24 +19,30 @@
 #include <sys/types.h>
 #include <sys/select.h>
 
-#include "opencv2/objdetect.hpp"
-#include "opencv2/highgui.hpp"
-#include "opencv2/imgproc.hpp"
-#include "opencv2/videoio.hpp"
-#include <iostream>
+// #include "opencv2/objdetect.hpp"
+// #include "opencv2/highgui.hpp"
+// #include "opencv2/imgproc.hpp"
+// #include "opencv2/videoio.hpp"
+// #include <iostream>
 
-#include "jpeglib.h"
-#include "jconfig.h"
-#include "jerror.h"
-#include "jmorecfg.h"
-#include "turbojpeg.h"
+// #include "jpeglib.h"
+// #include "jconfig.h"
+// #include "jerror.h"
+// #include "jmorecfg.h"
+// #include "turbojpeg.h"
 
-#include "opencv2/imgproc/imgproc_c.h"
-#include "opencv2/imgproc/imgproc.hpp"
-#include <opencv2/opencv.hpp>
-#include "opencv2/objdetect.hpp"
+// #include "opencv2/imgproc/imgproc_c.h"
+// #include "opencv2/imgproc/imgproc.hpp"
+// #include <opencv2/opencv.hpp>
+// #include "opencv2/objdetect.hpp"
+extern "C"
+{
+    #include "/opt/libjpeg-turbo/include/jpeglib.h"
+
+}
+#include "/opt/libjpeg-turbo/include/turbojpeg.h"
 #include <iostream>
-#include "hps_0.h"
+// #include "hps_0.h"
 
 
 
@@ -55,7 +61,7 @@
 
 #define ALT_STM_OFST (0xfc000000)
 #define ALT_LWFPGASLVS_OFST (0xff200000)  // axi_lw_master
-#define ALT_AXI_FPGASLVS_OFST (0xC0000000)
+
 #define ALT_AXI_FPGASLVS_OFST (0xC0000000)  // axi_master
 #define HW_FPGA_AXI_SPAN (0x40000000)  // Bridge span
 #define HW_FPGA_AXI_MASK ( HW_FPGA_AXI_SPAN - 1 )
@@ -581,18 +587,18 @@ static int uvc_streaming(src_v4l2_t *src)
         }
         yuyv_to_rgb32(video_out_width, video_out_heigh, (char*)src->buffer[src->buf.index].start, rgb_buff);
          // copy rgb data to sdram address
-        memcpy(h2p_memory_addr, (unsigned long*)rgb_buff, (video_out_heigh*video_out_width*4)/8);
+        memcpy(h2p_memory_addr, (unsigned long*)rgb_buff, (video_out_heigh*video_out_width*4));
         if(ioctl(src->fd, VIDIOC_QBUF, &src->buf) < 0)
         {
             printf("STREAMING: VIDIOC_QBUF failed \n");
         }
     }
 
+    uvc_stop_capturing(src);
     //free rgb buffer
     free(rgb_buff);
     uvc_free_mmap(src);
     // off
-    uvc_stop_capturing(src);
 }
 static int uvc_open(src_v4l2_t *src)
 {
@@ -640,23 +646,25 @@ int main()
         printf("Open /dev/mem failed \n");
         return -1;
     }
-
-    virtual_base = mmap(NULL, HW_FPGA_AXI_SPAN, (PROT_READ | PROT_WRITE), MAP_SHARED, fd, HW_REGS_BASE);
+   
+    virtual_base = mmap( NULL, HW_REGS_SPAN, ( PROT_READ | PROT_WRITE ), MAP_SHARED, fd, HW_REGS_BASE );
     if(virtual_base == MAP_FAILED)
     {
-        printf("Mapping address base failed \n");
+        printf("virtual_base: Mapping address base failed \n");
+        printf("%s \n", strerror(errno));
         return -1;
     }
 
-    axi_virtual_base = mmap(NULL, HW_FPGA_AXI_SPAN, (PROT_READ | PROT_WRITE), MAP_SHARED, fd, ALT_AXI_FPGASLVS_OFST);
+    axi_virtual_base = mmap( NULL, HW_FPGA_AXI_SPAN, ( PROT_READ | PROT_WRITE ), MAP_SHARED, fd, ALT_AXI_FPGASLVS_OFST  );
     if(axi_virtual_base == MAP_FAILED)
     {
-        printf("Mapping address base failed \n");
+        printf("axi_virtual_base :Mapping address base failed \n");
+        printf("%s \n", strerror(errno));
         return -1;
     }
 
     h2p_memory_addr=(unsigned long*)axi_virtual_base;
-    h2p_vip_mix_addr=(unsigned long*)virtual_base + ( ( unsigned long  )( ALT_LWFPGASLVS_OFST + ALT_VIP_MIX_0_BASE ) & ( unsigned long)( HW_REGS_MASK ) );		
+    h2p_vip_mix_addr=virtual_base + ( ( unsigned long  )( ALT_LWFPGASLVS_OFST + ALT_VIP_MIX_0_BASE ) & ( unsigned long)( HW_REGS_MASK ) );		
 
     //Configure Mixer IP core
     VIP_MIX_Config();
