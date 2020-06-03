@@ -1,4 +1,3 @@
-
 #include <errno.h>
 
 /* Verification Test Environment Include Files */
@@ -20,27 +19,29 @@
 #include <sys/types.h>
 #include <sys/select.h>
 
-// #include "opencv2/objdetect.hpp"
-// #include "opencv2/highgui.hpp"
-// #include "opencv2/imgproc.hpp"
-// #include "opencv2/videoio.hpp"
+#include "opencv2/objdetect.hpp"
+#include "opencv2/highgui.hpp"
+#include "opencv2/imgproc.hpp"
+#include "opencv2/videoio.hpp"
+#include <iostream>
+
 extern "C"
 {
-#include "/opt/libjpeg-turbo/include/jpeglib.h"
-//#include <SDL_image.h>
+    #include </opt/libjpeg-turbo/include/jpeglib.h>
+    #include </opt/libjpeg-turbo/include/turbojpeg.h>
 }
-//#include <config.h>
-// #include "./opencv/include/jerror.h"
-// #include "./opencv/include/jmorecfg.h"
-#include "/opt/libjpeg-turbo/include/turbojpeg.h"
-
-// #include "opencv2/imgproc/imgproc_c.h"
-// #include "opencv2/imgproc/imgproc.hpp"
-// #include <opencv2/opencv.hpp>
-// #include "opencv2/objdetect.hpp"
+// #include <jconfig.h>
+// #include <jerror.h>
+// #include <jmorecfg.h>
+// #include <turbojpeg.h>
+#include "opencv2/imgproc/imgproc_c.h"
+#include "opencv2/imgproc/imgproc.hpp"
+#include <opencv2/opencv.hpp>
 #include <iostream>
-#include "hps_0.h"
+// #include "hps_0.h"
 
+
+using namespace cv;
 #define BUFFER_TEST_NUM 4
 #define SAT(c)       \
     if (c & (~255))  \
@@ -52,36 +53,6 @@ extern "C"
     }
 #define SDRAM_BASE_ADDR 0
 #define ALT_VIP_SOFTWARE_RESET_N_BASE 0x00000200 //
-#define SDRAM_BASE_ADDR 0
-#define ALT_VIP_SOFTWARE_RESET_N_BASE 0x00000200   //
-
-#define ALT_STM_OFST (0xfc000000)
-#define ALT_LWFPGASLVS_OFST (0xff200000)  // axi_lw_master
-#define ALT_AXI_FPGASLVS_OFST (0xC0000000)
-#define ALT_AXI_FPGASLVS_OFST (0xC0000000)  // axi_master
-#define HW_FPGA_AXI_SPAN (0x40000000)  // Bridge span
-#define HW_FPGA_AXI_MASK ( HW_FPGA_AXI_SPAN - 1 )
-
-#define ALT_GPIO1_BASE_OFST   (0xFF709000)
-
-#define HW_REGS_BASE ( ALT_STM_OFST )
-#define HW_REGS_SPAN (0x04000000 )
-#define HW_REGS_MASK ( HW_REGS_SPAN - 1 )
-
-
-#define DEMO_VGA_FRAME0_ADDR					                0x00000000//0x00080000 //0x00100000  //on chip memory base
-#define FR0_FRAME0_OFFSET							(0x00000000)
-#define FR0_FRAME1_OFFSET	
-
-//base addr
-static volatile unsigned long *h2p_lw_axi_addr=NULL;
-static volatile unsigned long *h2p_vip_frame_reader0_addr=NULL;
-static volatile unsigned long *h2p_vip_frame_reader1_addr=NULL;
-static  unsigned long *h2p_memory_addr=NULL;
-static volatile unsigned long *h2p_onchip_memory_addr=NULL;
-static volatile unsigned long *h2p_vip_mix_addr=NULL;
-
-
 
 typedef struct
 {
@@ -93,7 +64,9 @@ typedef struct
 {
     const char *dev_name;
     int fd;
+
     int mmap_flag;
+
     struct v4l2_capability cap;
     struct v4l2_format fmt;
     struct v4l2_requestbuffers request_buff;
@@ -107,70 +80,11 @@ typedef struct
 } src_v4l2_t;
 
 src_v4l2_t uvc_src_v4l2;
-int video_out_width = 1280;
-int video_out_heigh = 720;
+int video_out_width = 640;
+int video_out_heigh = 480;
 int video_out_fmt = V4L2_PIX_FMT_YUYV;
-
-char *v4l2_device_file = "/dev/video0";
-char *jpeg_output = "Capture.jpg";
-
-
-/////////////////////////////////////////////////////////
-// VIP Frame Reader: Select active frame
-
-void VIP_FR0_SetActiveFrame(int nActiveFrame){
-	
-	// select active frame
-	h2p_vip_frame_reader0_addr[3]=nActiveFrame; // active frame 0 was set
-	
-}
-
-/////////////////////////////////////////////////////////
-// VIP Frame Reader: configure
-
-void VIP_FR_Config(int Width, int Height){
-	int word = Width*Height;
-	int cycle = Width*Height;
-	int interlace = 0;
-	
-	// stop
-	h2p_vip_frame_reader0_addr[0]=0x00; // stop
-	printf("Width=%d\r\n",Width);
-	printf("Width=%d\r\n",Height);
-	// configure frame 0
-	h2p_vip_frame_reader0_addr[4]=DEMO_VGA_FRAME0_ADDR+FR0_FRAME0_OFFSET; // // frame0 base address
-	h2p_vip_frame_reader0_addr[5]=word; // frame0 word
-	h2p_vip_frame_reader0_addr[6]=cycle; //  The number of single-cycle color patterns to read for the frame
-	h2p_vip_frame_reader0_addr[8]=Width; // frame0 width  
-	h2p_vip_frame_reader0_addr[9]=Height; // frame0 height
-	h2p_vip_frame_reader0_addr[10]=interlace; // frame0 interlace
-
-	h2p_vip_frame_reader0_addr[0]=0x01; //start
-
-	// select active frame
-	h2p_vip_frame_reader0_addr[3]=0; // active frame 0 was set
-		
-}
-
-/////////////////////////////////////////////////////////
-// VIP MIX
-void    VIP_MIX_Config(void){
- 	h2p_vip_mix_addr[0]=0x00; //stop   	
- 	
- 	// din0 is layer 0, background, fixed
-		
-	// layer 2 (log)
-	h2p_vip_mix_addr[2]=130; 
-	h2p_vip_mix_addr[3]=770;
-	h2p_vip_mix_addr[4]=0x01;
-	
-	h2p_vip_mix_addr[5]=0;//(SCREEN_WIDTH-VIDEO_WIDTH)/2;//layer1 x offset
-	h2p_vip_mix_addr[6]=0;//(SCREEN_HEIGHT-VIDEO_HEIGHT)/2;//layer1 y offset
-	h2p_vip_mix_addr[7]=0x01;//set layer 1 active	
-	
-    h2p_vip_mix_addr[0]=0x01; //start
-}
-
+char v4l2_device_file[50] = "/dev/video0";
+char jpeg_output[50] = "Capture.jpg";
 
 static int uvc_get_capability(src_v4l2_t *src_v4l2)
 {
@@ -229,9 +143,9 @@ static int uvc_set_input(src_v4l2_t *src_v4l2)
         printf("Unable to query input %d \n", input.index);
         return -1;
     }
-    printf("==> Input %i information:", input.index);
-    printf("==> name = \"%s\"\n", input.name);
-    printf("==> Type = %08X\n", input.type);
+    printf(" Input %i information:", input.index);
+    printf("name = \"%s\"", input.name);
+    printf("type = %08X", input.type);
 
     if (ioctl(src_v4l2->fd, VIDIOC_S_INPUT, &input.index) < 0)
     {
@@ -252,8 +166,6 @@ static int uvc_set_pix_format(src_v4l2_t *src_v4l2)
     {
         printf("Setting format failed \n");
         return -1;
-    }else{
-        printf("==> Setting format: (%d, %d)\n", video_out_width, video_out_heigh);
     }
     return 0;
 }
@@ -273,8 +185,6 @@ int uvc_set_fps(src_v4l2_t *src_v4l2)
         printf("Error setting frame rate:");
         printf("VIDIOC_S_PARM: %s", strerror(errno));
         return (-1);
-    }else{
-        printf("'==> Set stream parameter successfully\n");
     }
 
     return (0);
@@ -327,7 +237,7 @@ static int uvc_set_mmap(src_v4l2_t *src)
 
     for (index = 0; index < src->request_buff.count; index++)
     {
-        
+
         memset(&buf, 0, sizeof(buf));
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
@@ -518,12 +428,86 @@ static int uvc_capture(src_v4l2_t *src, const char* file)
         {
             printf("VIDIOC_DQBUF: %s \n", strerror(errno));
         }
-        else{
-            printf("==>Dequeue buffer successfully\n");
-        }
         compress_yuyv_to_jpeg((unsigned char*)src->buffer[src->buf.index].start, file_fd);
         fclose(file_fd);
         printf("Frame saved in File %s\n", file);
+    }
+}
+
+static int uvc_stream(src_v4l2_t *src)
+{
+    printf("start capturing \n");
+    if(src->time_out)
+    {
+        fd_set fds;
+        struct timeval tv;
+        int result;
+
+        FD_ZERO(&fds);
+        FD_SET(src->fd, &fds);
+
+        tv.tv_sec = src->time_out;
+        tv.tv_usec = 0;
+
+        result = select((src->fd) + 1, &fds, NULL, NULL, &tv);
+
+        if(result == -1)
+        {
+            printf("Select() function failed \n");
+            return -1;
+        }
+        if(result == 0)
+        {
+            printf("Time out \n");
+            return -1;
+        }
+    }
+
+    if(src->mmap_flag == 1)
+    {
+        // printf("mmap in processing \n");
+        // FILE* file_fd;
+        // file_fd = fopen(file, "wb");
+        // if(file_fd == NULL)
+        // {
+        //     printf("open file %s failed \n", file);
+        //     return -1;
+        // }
+       // if(src->pFrame > 0)
+        //{
+          
+        //}
+        memset(&src->buf, 0, sizeof(src->buf));
+        
+
+        while(1){   
+
+            src->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            src->buf.memory = V4L2_MEMORY_MMAP;     
+            if(ioctl(src->fd, VIDIOC_QBUF, &src->buf) < 0)
+            {
+                printf("VIDIOC_QBUF: %s \n", strerror(errno));
+            }
+
+            if(ioctl(src->fd, VIDIOC_DQBUF, &src->buf) < 0)
+            {
+                printf("VIDIOC_DQBUF: %s \n", strerror(errno));
+            }else{
+                printf("VIDIOC_DQBUF successfully\n");
+            }
+
+            cv::Size szSize(video_out_width, video_out_heigh);
+            cv::Mat mSrc(szSize,CV_8UC2, src->buffer[src->buf.index].start);
+            cv::Mat mSrc_BGR(szSize, CV_8UC3);
+            cvtColor(mSrc, mSrc_BGR, COLOR_YUV2BGR_YUYV);
+            imshow("Image BGR", mSrc_BGR);      
+            waitKey(10);
+            
+        }
+        return -1;
+        //compress_yuyv_to_jpeg((unsigned char*)src->buffer[src->buf.index].start, file_fd);
+        //fclose(file_fd);
+       // printf("Frame saved in File %s\n", file);
     }
 }
 
@@ -563,41 +547,6 @@ static void srcv4l2_init(src_v4l2_t *src)
 int main()
 {
 
-    void *virtual_base;
-	void *axi_virtual_base;
-	int fd;
-    long *rgb_buff;
-    rgb_buff = (long *) malloc (sizeof(long) * video_out_width * video_out_heigh * 4);
-
-    if(fd = open("/dev/mem", O_RDWR | O_SYNC) < 0)
-    {
-        printf("Open /dev/mem failed \n");
-        return -1;
-    }
-
-    virtual_base = mmap( NULL, HW_REGS_SPAN, ( PROT_READ | PROT_WRITE ), MAP_SHARED, fd, HW_REGS_BASE );
-    if(virtual_base == MAP_FAILED)
-    {
-        printf("Mapping address base failed \n");
-        printf("virtual base failed %s \n", strerror(errno));
-        return -1;
-    }
-
-    axi_virtual_base =mmap( NULL, HW_FPGA_AXI_SPAN, ( PROT_READ | PROT_WRITE ), MAP_SHARED, fd,ALT_AXI_FPGASLVS_OFST  );
-    if(axi_virtual_base == MAP_FAILED)
-    {
-        printf("Mapping address base failed \n");
-        return -1;
-    }
-
-    h2p_memory_addr=(unsigned long*)axi_virtual_base;
-    h2p_vip_mix_addr=(unsigned long*)virtual_base + ( ( unsigned long  )( ALT_LWFPGASLVS_OFST + ALT_VIP_MIX_0_BASE ) & ( unsigned long)( HW_REGS_MASK ) );		
-
-    //Configure Mixer IP core
-    VIP_MIX_Config();
-    // Configure Frame Reader core
-	VIP_FR_Config(video_out_width, video_out_heigh);
-
     srcv4l2_init(&uvc_src_v4l2);
     uvc_open(&uvc_src_v4l2);
     uvc_get_capability(&uvc_src_v4l2);
@@ -605,8 +554,8 @@ int main()
     uvc_set_pix_format(&uvc_src_v4l2);
     //uvc_set_fps(&uvc_src_v4l2);
     uvc_set_mmap(&uvc_src_v4l2);
-    uvc_capture(&uvc_src_v4l2, jpeg_output);
+    uvc_stream(&uvc_src_v4l2);  
+    //uvc_capture(&uvc_src_v4l2, jpeg_output);
     uvc_close(&uvc_src_v4l2);
-
     return 0;
-}
+} 
