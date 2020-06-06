@@ -50,23 +50,21 @@ extern "C"
         else         \
             c = 255; \
     }
-#define SDRAM_BASE_ADDR 0
-#define ALT_VIP_SOFTWARE_RESET_N_BASE 0x00000200 //
-#define SDRAM_BASE_ADDR 0
-#define ALT_VIP_SOFTWARE_RESET_N_BASE 0x00000200   //
-
 #define ALT_STM_OFST (0xfc000000)
 #define ALT_LWFPGASLVS_OFST (0xff200000)  // axi_lw_master
-#define ALT_AXI_FPGASLVS_OFST (0xC0000000)
+
 #define ALT_AXI_FPGASLVS_OFST (0xC0000000)  // axi_master
 #define HW_FPGA_AXI_SPAN (0x40000000)  // Bridge span
 #define HW_FPGA_AXI_MASK ( HW_FPGA_AXI_SPAN - 1 )
 
-#define ALT_GPIO1_BASE_OFST   (0xFF709000)
 
 #define HW_REGS_BASE ( ALT_STM_OFST )
 #define HW_REGS_SPAN (0x04000000 )
 #define HW_REGS_MASK ( HW_REGS_SPAN - 1 )
+
+#define ALT_GPIO1_BASE_OFST   (0xFF709000)
+
+
 
 
 #define DEMO_VGA_FRAME0_ADDR					                0x00000000//0x00080000 //0x00100000  //on chip memory base
@@ -509,7 +507,7 @@ static int uvc_capture(src_v4l2_t *src, const char* file)
             }
         }
 
-        memset(&src->buf, 0, sizeof(src->buf));
+        memse(&src->buf, 0, sizeof(src->buf));
 
         src->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         src->buf.memory = V4L2_MEMORY_MMAP;
@@ -526,6 +524,38 @@ static int uvc_capture(src_v4l2_t *src, const char* file)
         printf("Frame saved in File %s\n", file);
     }
 }
+
+static int uvc_streaming(src_v4l2_t *src)
+{
+    long *rgb_buff;
+    rgb_buff = (long *) malloc (sizeof(long) * video_out_width * video_out_heigh * 4);
+
+   while(1)
+    {
+
+        src->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        src->buf.memory = V4L2_MEMORY_MMAP;
+        if (ioctl (src->fd, VIDIOC_DQBUF, &src->buf) < 0)
+        {
+            printf("VIDIOC_DQBUF failed.\n");
+            break;
+        }
+        yuyv_to_rgb32(video_out_width, video_out_heigh, (char*)src->buffer[src->buf.index].start, rgb_buff);
+         // copy rgb data to sdram address
+        memcpy(h2p_memory_addr, (unsigned long*)rgb_buff, (video_out_heigh*video_out_width*4));
+        if(ioctl(src->fd, VIDIOC_QBUF, &src->buf) < 0)
+        {
+            printf("STREAMING: VIDIOC_QBUF failed \n");
+        }
+    }
+
+    uvc_stop_capturing(src);
+    //free rgb buffer
+    free(rgb_buff);
+    uvc_free_mmap(src);
+    // off
+}
+
 
 static int uvc_open(src_v4l2_t *src)
 {
@@ -569,30 +599,31 @@ int main()
     long *rgb_buff;
     rgb_buff = (long *) malloc (sizeof(long) * video_out_width * video_out_heigh * 4);
 
-    if(fd = open("/dev/mem", O_RDWR | O_SYNC) < 0)
-    {
-        printf("Open /dev/mem failed \n");
-        return -1;
-    }
 
-    virtual_base = mmap( NULL, HW_REGS_SPAN, ( PROT_READ | PROT_WRITE ), MAP_SHARED, fd, HW_REGS_BASE );
-    if(virtual_base == MAP_FAILED)
-    {
-        printf("Mapping address base failed \n");
-        printf("virtual base failed %s \n", strerror(errno));
-        return -1;
-    }
+	if( ( fd = open( "/dev/mem", ( O_RDWR | O_SYNC ) ) ) == -1 ) {
+		printf( "ERROR: could not open \"/dev/mem\"...\n" );
+		return( 1 );
+	}
 
-    axi_virtual_base =mmap( NULL, HW_FPGA_AXI_SPAN, ( PROT_READ | PROT_WRITE ), MAP_SHARED, fd,ALT_AXI_FPGASLVS_OFST  );
-    if(axi_virtual_base == MAP_FAILED)
-    {
-        printf("Mapping address base failed \n");
-        return -1;
-    }
+	// lw
+	virtual_base = mmap( NULL, HW_REGS_SPAN, ( PROT_READ | PROT_WRITE ), MAP_SHARED, fd, HW_REGS_BASE );	
+	if( virtual_base == MAP_FAILED ) {
+		printf( "ERROR: mmap() failed...\n" );
+		printf("%d %s \n", errno, strerror(errno))
+		close( fd );
+		return( -1 );
+	}
+	axi_virtual_base  = mmap( NULL, HW_FPGA_AXI_SPAN, ( PROT_READ | PROT_WRITE ), MAP_SHARED, fd,ALT_AXI_FPGASLVS_OFST  );	
+	if( axi_virtual_base == MAP_FAILED ) {
+		printf( "ERROR: axi mmap() failed...\n" );
+        printf("%s \n", strerror(errno));
+		close( fd );
+		return( -1 );
+	}
 
     h2p_memory_addr=(unsigned long*)axi_virtual_base;
     h2p_vip_mix_addr=(unsigned long*)virtual_base + ( ( unsigned long  )( ALT_LWFPGASLVS_OFST + ALT_VIP_MIX_0_BASE ) & ( unsigned long)( HW_REGS_MASK ) );		
-
+    h2p_vip_frame_reader0_addr= virtual_base + ( ( unsigned long  )( ALT_LWFPGASLVS_OFST + ALT_VIP_VFR_0_BASE ) & ( unsigned long)( HW_REGS_MASK ) );
     //Configure Mixer IP core
     VIP_MIX_Config();
     // Configure Frame Reader core
@@ -603,9 +634,10 @@ int main()
     uvc_get_capability(&uvc_src_v4l2);
     uvc_set_input(&uvc_src_v4l2);
     uvc_set_pix_format(&uvc_src_v4l2);
-    //uvc_set_fps(&uvc_src_v4l2);
+    uvc_set_fps(&uvc_src_v4l2);
     uvc_set_mmap(&uvc_src_v4l2);
-    uvc_capture(&uvc_src_v4l2, jpeg_output);
+//    uvc_capture(&uvc_src_v4l2, jpeg_output);
+    uvc_streaming(&uvc_src_v4l2);
     uvc_close(&uvc_src_v4l2);
 
     return 0;

@@ -665,9 +665,9 @@ int main()
 
     h2p_memory_addr=(unsigned long*)axi_virtual_base;
     h2p_vip_mix_addr=virtual_base + ( ( unsigned long  )( ALT_LWFPGASLVS_OFST + ALT_VIP_MIX_0_BASE ) & ( unsigned long)( HW_REGS_MASK ) );		
-
+    h2p_vip_frame_reader0_addr= virtual_base + ( ( unsigned long  )( ALT_LWFPGASLVS_OFST + ALT_VIP_VFR_0_BASE ) & ( unsigned long)( HW_REGS_MASK ) );
     //Configure Mixer IP core
-    VIP_MIX_Config();
+  //  VIP_MIX_Config();
     // Configure Frame Reader core
 	VIP_FR_Config(video_out_width, video_out_heigh);
 
